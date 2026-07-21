@@ -1,0 +1,14 @@
+# Dataset
+/data/
+# Python
+training/.venv
+__pycache__/
+*.pyc
+# Go
+/bin/
+*.test
+# Secrets / editor / OS
+.env
+.DS_Store
+.idea/
+.vscode/
