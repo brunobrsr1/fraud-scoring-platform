@@ -99,6 +99,12 @@ func (m *Model) Score(features []float64) (float64, error) {
 		}
 		z += x * m.Weights[i]
 	}
+	// Even with finite inputs, extreme magnitudes can overflow the dot-product to
+	// ±Inf (or NaN via +Inf + -Inf). Guard the accumulated logit so Score never
+	// returns a non-finite "probability" and the [0,1] invariant holds strictly.
+	if !isFinite(z) {
+		return 0, fmt.Errorf("model: non-finite logit from feature magnitudes: %v", z)
+	}
 	// Sequential summation is well within the <1e-9 parity budget vs numpy's
 	// pairwise sum (the difference lands around 1e-15).
 	return sigmoid(z), nil

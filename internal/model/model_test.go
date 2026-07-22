@@ -165,6 +165,16 @@ func TestScoreNonFiniteFeature(t *testing.T) {
 	}
 }
 
+// TestScoreOverflowLogit covers finite-but-extreme inputs whose dot-product
+// overflows to a non-finite logit (+Inf + -Inf => NaN). Score must error, not
+// return NaN, so the [0,1] probability invariant is never violated.
+func TestScoreOverflowLogit(t *testing.T) {
+	m := &Model{Version: "v1", FeatureOrder: []string{"A", "B"}, Weights: []float64{1e300, 1e300}}
+	if _, err := m.Score([]float64{1e300, -1e300}); err == nil {
+		t.Fatal("expected error for overflowing logit, got nil")
+	}
+}
+
 // TestScoreInRange checks the probability invariant across a wide range of
 // logits, including magnitudes that would overflow a naive sigmoid.
 func TestScoreInRange(t *testing.T) {
