@@ -82,11 +82,14 @@ Request:
 ```json
 {
   "transaction_id": "tx_987654321alpha",
-  "user_id": "usr_102938",
-  "amount": 250.00,
-  "currency": "EUR",
-  "merchant_category_code": "5411",
-  "timestamp": "2026-07-16T15:55:10Z"
+  "features": {
+    "Time": 0.0,
+    "V1": -1.359807,
+    "V2": -0.072781,
+    "...": "... V3 through V27 ...",
+    "V28": -0.021053,
+    "Amount": 149.62
+  }
 }
 ```
 
@@ -94,17 +97,27 @@ Response:
 ```json
 {
   "transaction_id": "tx_987654321alpha",
-  "score": 0.04,
+  "score": 0.26201699054165745,
   "meta": {
-    "model_version": "v2.1.0",
+    "model_version": "v1.0.0",
     "registry_sync": "fresh",
     "seconds_since_registry_contact": 0
   }
 }
 ```
 
-- `score` — a `float64` strictly in `[0.0, 1.0]`. The service returns a **probability, never a
-  verdict**; thresholding is the caller's business logic.
+The features above are the `golden[legit]` row of the dataset, truncated here for readability;
+the full-precision vector and the exact score it must produce are asserted in
+[`internal/model/model_test.go`](internal/model/model_test.go).
+
+- `features` — a **named** map, not a positional array. The server builds the model input from
+  the artifact's own `feature_order`, so a client cannot silently mis-order the vector. Every
+  feature must be present exactly once, and unknown keys are rejected: a missing or extra key
+  is a `400`, never a plausible-but-wrong score. The feature schema is immutable across model
+  versions — a promotion may change weights, never the feature set ([ADR-004](docs/adr/adr-004.md)).
+- `score` — a `float64` strictly in `[0.0, 1.0]`, returned at full precision and never rounded.
+  The service returns a **probability, never a verdict**; thresholding is the caller's business
+  logic.
 - `registry_sync` ∈ `{ fresh, stale, stale_critical }`.
 - `seconds_since_registry_contact` — deliberately *not* `staleness_seconds` (see above).
 
@@ -134,11 +147,19 @@ competes with it for attention.
 
 ## Design decisions (ADRs)
 
+Written:
+
+- [**ADR-004** — Scoring API contract](docs/adr/adr-004.md) — named feature map over a positional
+  array, strict validation in both directions, and a feature schema held immutable across model
+  versions so that nodes mid-convergence cannot accept different request shapes.
+
+Decided, write-up pending:
+
 - **ADR-001** — Write the Raft core vs. import etcd/Consul.
 - **ADR-002** — Deployment target: EC2 + Docker + ALB + Terraform; Kubernetes local-dev only.
 - **ADR-003** — Registry read semantics: linearizable leader reads vs. local follower reads.
 
-<!-- TODO: write ADRs (half a page each) and link them here. -->
+<!-- TODO: write up ADR-001..003 (half a page each) and link them here. -->
 
 ## Service-level objectives
 
