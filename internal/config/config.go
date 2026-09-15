@@ -1,3 +1,4 @@
+// Package config reads settings from the environment.
 package config
 
 import (
@@ -9,7 +10,7 @@ import (
 
 const (
 	defaultHTTPAddr  = ":8080"
-	defaultModelPath = "models/v1.0.0/model.json"
+	defaultModelPath = "models/v1.0.0/model.json" // relative to the working directory
 )
 
 type Config struct {
@@ -17,6 +18,7 @@ type Config struct {
 	ModelPath string
 }
 
+// Load applies defaults and validates HTTP_ADDR before anything expensive runs.
 func Load() (Config, error) {
 	addr := os.Getenv("HTTP_ADDR")
 	if addr == "" {
@@ -25,7 +27,7 @@ func Load() (Config, error) {
 
 	if err := validateTCPAddr(addr); err != nil {
 		return Config{}, fmt.Errorf(
-			"config: invalid HTTP_ADDR: %q: %v", addr, err,
+			"config: invalid HTTP_ADDR: %q: %w", addr, err,
 		)
 	}
 
@@ -38,9 +40,9 @@ func Load() (Config, error) {
 		HTTPAddr:  addr,
 		ModelPath: modelPath,
 	}, nil
-
 }
 
+// Port 0 is allowed (the kernel picks one); named ports like ":http" are not.
 func validateTCPAddr(addr string) error {
 	_, port, err := net.SplitHostPort(addr)
 	if err != nil {
