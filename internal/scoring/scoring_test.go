@@ -110,3 +110,39 @@ func TestScoreInvalidFeatures(t *testing.T) {
 		})
 	}
 }
+
+func TestScoreGoldenLegit(t *testing.T) {
+	m := frozenModel(t)
+
+	want, err := m.Score(testfixtures.GoldenLegit)
+	if err != nil {
+		t.Fatalf("model.Score: %v", err)
+	}
+
+	service, err := New(m, fixedNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := service.Score(featureMap(m.FeatureOrder, testfixtures.GoldenLegit))
+	if err != nil {
+		t.Fatalf("Score: %v", err)
+	}
+
+	// scoring must preserve the exact model output.
+	if got.Score != want {
+		t.Fatalf(
+			"scoring changed model output: got %.17g, want %.17g",
+			got.Score,
+			want,
+		)
+	}
+
+	if got.ModelVersion != "v1.0.0" {
+		t.Fatalf("model version = %q, want %q", got.ModelVersion, "v1.0.0")
+	}
+
+	if !got.ScoredAt.Equal(fixedNow()) {
+		t.Fatalf("scored_at = %v, want %v", got.ScoredAt, fixedNow())
+	}
+}
