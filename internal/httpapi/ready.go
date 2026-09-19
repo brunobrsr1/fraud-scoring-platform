@@ -1,9 +1,6 @@
 package httpapi
 
-import (
-	"log/slog"
-	"net/http"
-)
+import "net/http"
 
 type readiness interface {
 	Ready() bool
@@ -12,11 +9,22 @@ type readiness interface {
 func readyHandler(service readiness) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if service.Ready() {
-			writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
+			writeJSON(
+				w,
+				http.StatusOK,
+				map[string]string{
+					"status": "ready",
+				},
+			)
 			return
 		}
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "not_ready"})
+		// if the model becomes unavailable, /readyz should return 503
+		writeJSON(
+			w,
+			http.StatusServiceUnavailable,
+			map[string]string{
+				"status": "not_ready",
+			},
+		)
 	}
 }
-
-var _ slog.Handler
