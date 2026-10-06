@@ -164,12 +164,19 @@ var allowedTopLevelFields = map[string]struct{}{
 // object keys at every nesting level. At the top level it also requires
 // exact field names.
 func validateJSONStructure(data []byte) error {
+	// Checked up front: Token returns a bare io.EOF both for an empty body and
+	// for one cut off mid-value, so EOF alone can't tell them apart. These are
+	// the four whitespace bytes JSON allows.
+	if len(bytes.Trim(data, " \t\r\n")) == 0 {
+		return errors.New("request body is empty")
+	}
+
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
 
 	if err := consumeJSONValue(dec, true); err != nil {
 		if errors.Is(err, io.EOF) {
-			return errors.New("request body is empty")
+			return errors.New("invalid JSON: unexpected end of input")
 		}
 		return fmt.Errorf("invalid JSON: %v", err)
 	}
