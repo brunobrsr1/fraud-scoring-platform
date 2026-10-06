@@ -16,7 +16,7 @@ func New(service *scoring.Service, logger *slog.Logger) http.Handler {
 
 	mux.HandleFunc("GET /readyz", readyHandler(service))
 
-	mux.HandleFunc("POST /score", scoreHandler(service, logger))
+	mux.HandleFunc("POST /v1/score", scoreHandler(service, logger))
 
 	return mux
 }

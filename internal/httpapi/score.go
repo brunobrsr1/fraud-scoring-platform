@@ -26,9 +26,13 @@ type scoreRequest struct {
 }
 
 type scoreResponse struct {
-	TransactionID string  `json:"transaction_id"`
-	Score         float64 `json:"score"`
-	ModelVersion  string  `json:"model_version"`
+	TransactionID string    `json:"transaction_id"`
+	Score         float64   `json:"score"`
+	Meta          scoreMeta `json:"meta"`
+}
+
+type scoreMeta struct {
+	ModelVersion string `json:"model_version"`
 }
 
 type errorResponse struct {
@@ -117,7 +121,9 @@ func scoreHandler(service *scoring.Service, logger *slog.Logger) http.HandlerFun
 			scoreResponse{
 				TransactionID: req.TransactionID,
 				Score:         result.Score,
-				ModelVersion:  result.ModelVersion,
+				Meta: scoreMeta{
+					ModelVersion: result.ModelVersion,
+				},
 			})
 	}
 }
