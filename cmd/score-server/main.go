@@ -16,6 +16,7 @@ import (
 	"github.com/brunobrsr1/fraud-scoring-platform/internal/config"
 	"github.com/brunobrsr1/fraud-scoring-platform/internal/httpapi"
 	"github.com/brunobrsr1/fraud-scoring-platform/internal/model"
+	"github.com/brunobrsr1/fraud-scoring-platform/internal/scoring"
 )
 
 // Zero means no timeout in net/http. Keep writeTimeout <= shutdownTimeout <
@@ -67,8 +68,13 @@ func run(logger *slog.Logger) error {
 		"features", m.FeatureCount(),
 	)
 
+	service, err := scoring.New(m, time.Now)
+	if err != nil {
+		return fmt.Errorf("create scoring service: %w", err)
+	}
+
 	srv := &http.Server{
-		Handler:           httpapi.New(),
+		Handler:           httpapi.New(service, logger),
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readTimeout,
 		WriteTimeout:      writeTimeout,

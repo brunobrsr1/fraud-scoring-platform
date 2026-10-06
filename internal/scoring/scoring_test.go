@@ -5,6 +5,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/brunobrsr1/fraud-scoring-platform/internal/model"
 	"github.com/brunobrsr1/fraud-scoring-platform/internal/testfixtures"
 )
 
@@ -83,6 +84,13 @@ func TestScoreInvalidFeatures(t *testing.T) {
 				t.Fatal("expected error, got nil")
 			}
 
+			// The handler maps ClientError to 400, so every FeatureError must
+			// arrive wrapped in one.
+			var clientErr *ClientError
+			if !errors.As(err, &clientErr) {
+				t.Fatalf("error type = %T, want *ClientError: %v", err, err)
+			}
+
 			var featureErr *FeatureError
 			if !errors.As(err, &featureErr) {
 				t.Fatalf(
@@ -108,6 +116,42 @@ func TestScoreInvalidFeatures(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+func TestScoreOverflowIsClientError(t *testing.T) {
+	m := frozenModel(t)
+
+	// Every feature is finite, but the weighted sum overflows float64.
+	values := make([]float64, len(m.FeatureOrder))
+	for i := range values {
+		values[i] = 1e308
+	}
+
+	service, err := New(m, fixedNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = service.Score(featureMap(m.FeatureOrder, values))
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	var clientErr *ClientError
+	if !errors.As(err, &clientErr) {
+		t.Fatalf("error type = %T, want *ClientError: %v", err, err)
+	}
+
+	// The caller sees an actionable message, not the model's internals.
+	const wantMessage = "scoring: feature values are too large to score"
+	if clientErr.Error() != wantMessage {
+		t.Errorf("message = %q, want %q", clientErr.Error(), wantMessage)
+	}
+
+	// The cause survives for errors.Is.
+	if !errors.Is(err, model.ErrNonFiniteLogit) {
+		t.Errorf("errors.Is(err, model.ErrNonFiniteLogit) = false, want true")
 	}
 }
 

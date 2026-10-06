@@ -24,6 +24,10 @@ import (
 // match the model's weight count. Callers can match it with errors.Is.
 var ErrFeatureCount = errors.New("model: feature count mismatch")
 
+// ErrNonFiniteLogit is returned by Score when finite input values produce
+// a non-finite accumulated logit.
+var ErrNonFiniteLogit = errors.New("model: non-finite logit")
+
 // Model is the parsed, validated model artifact. It maps 1:1 onto model.json.
 // Weights is positional and aligned index-for-index with FeatureOrder; that
 // alignment is the whole contract with the offline training pipeline.
@@ -103,7 +107,11 @@ func (m *Model) Score(features []float64) (float64, error) {
 	// ±Inf (or NaN via +Inf + -Inf). Guard the accumulated logit so Score never
 	// returns a non-finite "probability" and the [0,1] invariant holds strictly.
 	if !isFinite(z) {
-		return 0, fmt.Errorf("model: non-finite logit from feature magnitudes: %v", z)
+		return 0, fmt.Errorf(
+			"%w: %v",
+			ErrNonFiniteLogit,
+			z,
+		)
 	}
 	// Sequential summation is well within the <1e-9 parity budget vs numpy's
 	// pairwise sum (the difference lands around 1e-15).
