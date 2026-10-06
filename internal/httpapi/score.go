@@ -143,9 +143,19 @@ func requireJSON(r *http.Request) error {
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
+	data, err := json.Marshal(value)
+	if err != nil {
+		errorData, _ := json.Marshal(errorResponse{
+			Error: "failed to serialize response",
+		})
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write(errorData)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(value)
+	_, _ = w.Write(data)
 }
 
 func writeError(w http.ResponseWriter, status int, message string) {
