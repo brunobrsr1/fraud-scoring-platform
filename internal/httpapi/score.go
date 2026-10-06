@@ -104,9 +104,9 @@ func scoreHandler(service *scoring.Service, logger *slog.Logger) http.HandlerFun
 		// Call the scoring service
 		result, err := service.Score(req.Features)
 		if err != nil {
-			var featureErr *scoring.FeatureError
-			if errors.As(err, &featureErr) {
-				writeError(w, http.StatusBadRequest, featureErr.Error())
+			var clientErr *scoring.ClientError
+			if errors.As(err, &clientErr) {
+				writeError(w, http.StatusBadRequest, clientErr.Error())
 				return
 			}
 			logger.Error("scoring failed", "transaction_id", req.TransactionID, "err", err)

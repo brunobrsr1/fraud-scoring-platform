@@ -1,6 +1,7 @@
 package scoring
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -102,11 +103,19 @@ func (s *Service) Score(features Features) (Result, error) {
 
 	vector, err := vectorFor(m, features)
 	if err != nil {
-		return Result{}, err
+		return Result{}, &ClientError{Message: err.Error(), Err: err}
 	}
 
 	score, err := m.Score(vector)
 	if err != nil {
+		// Every feature is finite, but together they overflow the model. The
+		// cause stays in Err; the caller gets a message it can act on.
+		if errors.Is(err, model.ErrNonFiniteLogit) {
+			return Result{}, &ClientError{
+				Message: "scoring: feature values are too large to score",
+				Err:     err,
+			}
+		}
 		return Result{}, err
 	}
 

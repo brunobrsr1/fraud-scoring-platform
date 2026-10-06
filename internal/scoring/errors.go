@@ -18,6 +18,13 @@ type FeatureError struct {
 	Got     string
 }
 
+// ClientError marks a scoring failure caused by the request's input. Message
+// is safe to return to the caller; Err keeps the cause for errors.Is/As.
+type ClientError struct {
+	Message string
+	Err     error
+}
+
 func (e *FeatureError) Error() string {
 	switch e.Kind {
 	case FeatureMissing:
@@ -52,4 +59,12 @@ func (e *FeatureError) Error() string {
 			e.Feature,
 		)
 	}
+}
+
+func (e *ClientError) Error() string {
+	return e.Message
+}
+
+func (e *ClientError) Unwrap() error {
+	return e.Err
 }
