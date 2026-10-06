@@ -193,6 +193,11 @@ competes with it for attention.
 
 Written:
 
+- [**ADR-001** — Raft implementation](docs/adr/adr-001.md) — write the consensus core from the
+  Raft paper instead of importing etcd/Consul, kept independent of fraud scoring, accepting the
+  higher correctness risk in exchange for making consensus the thing being studied.
+- [**ADR-002** — Production deployment target](docs/adr/adr-002.md) — EC2 + Docker + ALB +
+  Terraform on AWS; Kubernetes for local development only, never a production dependency.
 - [**ADR-004** — Scoring API contract](docs/adr/adr-004.md) — named feature map over a positional
   array, strict validation in both directions (duplicate keys included), and a feature schema
   held immutable across model versions so that nodes mid-convergence cannot accept different
@@ -200,11 +205,9 @@ Written:
 
 Decided, write-up pending:
 
-- **ADR-001** — Write the Raft core vs. import etcd/Consul.
-- **ADR-002** — Deployment target: EC2 + Docker + ALB + Terraform; Kubernetes local-dev only.
 - **ADR-003** — Registry read semantics: linearizable leader reads vs. local follower reads.
 
-<!-- TODO: write up ADR-001..003 (half a page each) and link them here. -->
+<!-- TODO: write up ADR-003 (half a page) and link it here. -->
 
 ## Service-level objectives
 
