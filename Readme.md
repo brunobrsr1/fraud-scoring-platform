@@ -93,22 +93,21 @@ Request:
 }
 ```
 
-Response:
+Response (v0):
 ```json
 {
   "transaction_id": "tx_987654321alpha",
   "score": 0.26201699054165745,
   "meta": {
-    "model_version": "v1.0.0",
-    "registry_sync": "fresh",
-    "seconds_since_registry_contact": 0
+    "model_version": "v1.0.0"
   }
 }
 ```
 
 The features above are the `golden[legit]` row of the dataset, truncated here for readability;
 the full-precision vector and the exact score it must produce are asserted in
-[`internal/model/model_test.go`](internal/model/model_test.go).
+[`internal/model/model_test.go`](internal/model/model_test.go), and end to end over HTTP in
+[`internal/httpapi/score_test.go`](internal/httpapi/score_test.go).
 
 - `features` — a **named** map, not a positional array. The server builds the model input from
   the artifact's own `feature_order`, so a client cannot silently mis-order the vector. Every
@@ -118,11 +117,56 @@ the full-precision vector and the exact score it must produce are asserted in
 - `score` — a `float64` strictly in `[0.0, 1.0]`, returned at full precision and never rounded.
   The service returns a **probability, never a verdict**; thresholding is the caller's business
   logic.
+- `meta.model_version` — the model that produced this score.
+
+**Planned with the registry.** Two more `meta` fields arrive once nodes read the live model from
+the Raft registry:
+
 - `registry_sync` ∈ `{ fresh, stale, stale_critical }`.
 - `seconds_since_registry_contact` — deliberately *not* `staleness_seconds` (see above).
 
-<!-- TODO: /healthz (liveness), /readyz (must encode staleness for self-eject), /metrics,
-     error codes, timeout behaviour. -->
+v0 has no registry, so it omits them rather than report `fresh` / `0`: that would claim a
+contact that never happened.
+
+#### Validation
+
+Strict on purpose: a request the service is unsure about is rejected, never guessed at.
+
+- `Content-Type` must be `application/json`. The body is at most 64 KiB and holds exactly one
+  JSON object.
+- Field names match exactly (case-sensitive), and a key may not appear twice at any level.
+  Go's `encoding/json` would otherwise accept `Transaction_ID` and keep the last of two
+  duplicate keys, so the body gets a token pass before it is decoded.
+- `transaction_id` is a required string of at most 128 bytes. `features` is a required object.
+- Each feature is a JSON number that fits in a `float64`. Features that are each finite but
+  together overflow the model are a `400`, not a `500`: the bad input is the client's.
+
+#### Errors
+
+Errors from `/v1/score` are `{"error": "<message>"}` with `Content-Type: application/json`.
+
+| Status | When |
+|---|---|
+| `400` | Malformed, empty or truncated JSON; duplicate or unknown keys; a missing or invalid field or feature |
+| `404` | Unknown path |
+| `405` | Wrong method, e.g. `GET /v1/score` |
+| `413` | Body over 64 KiB |
+| `415` | `Content-Type` is not `application/json` |
+| `500` | A server-side failure; never caused by request content |
+
+`404` and `405` currently come from Go's router as `text/plain`, not the JSON error shape.
+
+### `GET /healthz` and `GET /readyz`
+
+- `/healthz` — liveness only: `200 {"status":"ok"}` while the process can answer. It checks no
+  dependency on purpose: a liveness probe that fails on a registry outage would restart the
+  whole fleet at once.
+- `/readyz` — readiness: `200 {"status":"ready"}` when a model is loaded, else
+  `503 {"status":"not_ready"}`. In v0 the model loads at startup or the process exits, so a
+  running node is always ready. With the registry, this is where self-eject lands: past a
+  time-since-contact threshold (OQ-5), the node reports not-ready and the load balancer drains it.
+
+<!-- TODO: /metrics, client-facing timeout behaviour. -->
 
 ## The model
 
@@ -150,8 +194,9 @@ competes with it for attention.
 Written:
 
 - [**ADR-004** — Scoring API contract](docs/adr/adr-004.md) — named feature map over a positional
-  array, strict validation in both directions, and a feature schema held immutable across model
-  versions so that nodes mid-convergence cannot accept different request shapes.
+  array, strict validation in both directions (duplicate keys included), and a feature schema
+  held immutable across model versions so that nodes mid-convergence cannot accept different
+  request shapes.
 
 Decided, write-up pending:
 
@@ -178,12 +223,29 @@ picked after measuring are excuses, not objectives.
 
 ## Running locally
 
+v0 is a single Go binary (Go 1.26+). Run it from the repository root, since the default model
+path is relative:
+
 ```bash
-# TODO — once the service skeleton exists:
-docker compose up
+go run ./cmd/score-server          # listens on :8080
+curl -s localhost:8080/readyz      # {"status":"ready"}
+
+# request.json: a body in the shape shown under API contract, with all 30 features
+curl -s -X POST localhost:8080/v1/score \
+  -H 'Content-Type: application/json' -d @request.json
+
+go test ./...
 ```
 
-<!-- Target: 3 Raft nodes + inference service + Prometheus/Grafana in docker-compose. -->
+| Variable | Default | Meaning |
+|---|---|---|
+| `HTTP_ADDR` | `:8080` | Listen address (`host:port`; port `0` lets the kernel pick) |
+| `MODEL_PATH` | `models/v1.0.0/model.json` | Model artifact, relative to the working directory |
+
+On `SIGINT` / `SIGTERM` the process stops accepting connections and gives in-flight requests up
+to 5 s to finish.
+
+<!-- Target: docker compose up — 3 Raft nodes + inference service + Prometheus/Grafana. -->
 
 ## On the Raft implementation
 
