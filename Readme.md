@@ -4,8 +4,8 @@ A real-time fraud-scoring inference service backed by a hand-written Raft consen
 core that makes model-version promotions **ordered, durable, and observable**. The
 scoring model is a frozen placeholder — the infrastructure is the point.
 
-> **Status:** v0 — local single-node serving (in progress). The distributed registry
-> and Raft core are the target, not yet built. See [Roadmap](#roadmap).
+> **Status:** v0 — local single-node serving, containerized with Docker Compose. The
+> distributed registry and Raft core are the target, not yet built. See [Roadmap](#roadmap).
 
 ---
 
@@ -274,9 +274,11 @@ debugged the core, and this section stays accurate to that.
 ## Roadmap
 
 - [x] Architecture spec — decided sections (§1.1–§1.7)
-- [ ] **v0 — local single-node serving** (frozen model, `POST /v1/score`) ← *now*
-- [ ] Reading block (Raft paper, DDIA ch. 9) → Tier-2 decisions + ADRs
-- [ ] Raft core (from paper) + registry state machine
+- [x] v0 — local single-node serving (frozen model, `POST /v1/score`)
+- [x] Containerized local dev (`docker compose up`)
+- [x] SLOs committed before measuring
+- [ ] **Raft core (from paper) + registry state machine** ← *now*
+- [ ] Observability (Prometheus, Grafana, structured logs)
 - [ ] AWS deployment (Terraform, 3-node cluster across 2 AZs)
 - [ ] Load testing + SLO verification
 
