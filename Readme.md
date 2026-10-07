@@ -226,17 +226,23 @@ picked after measuring are excuses, not objectives.
 
 ## Running locally
 
-v0 is a single Go binary (Go 1.26+). Run it from the repository root, since the default model
-path is relative:
+v0 is a single Go binary serving the frozen model. The quickest path needs only Docker:
 
 ```bash
-go run ./cmd/score-server          # listens on :8080
+docker compose up --build          # listens on :8080
 curl -s localhost:8080/readyz      # {"status":"ready"}
 
-# request.json: a body in the shape shown under API contract, with all 30 features
+# examples/golden-fraud.json is the golden fraud row used by the parity tests
 curl -s -X POST localhost:8080/v1/score \
-  -H 'Content-Type: application/json' -d @request.json
+  -H 'Content-Type: application/json' -d @examples/golden-fraud.json
+# {"transaction_id":"golden-fraud","score":0.9999998777523079,"meta":{"model_version":"v1.0.0"}}
+```
 
+Without Docker (Go 1.26+), run from the repository root, since the default model path is
+relative:
+
+```bash
+go run ./cmd/score-server
 go test ./...
 ```
 
