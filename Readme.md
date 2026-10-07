@@ -216,13 +216,21 @@ picked after measuring are excuses, not objectives.
 
 | SLO | Target |
 |---|---|
-| p99 scoring latency (nominal load) | _TBD_ |
-| Sustained throughput | _TBD_ |
-| Leader election after leader death | _< TBD s_ |
-| Committed writes lost on leader failure | **0** (to be proven) |
-| AWS cost budget | _< €TBD / month_ |
+| p99 scoring latency (nominal load) | < 50 ms |
+| Sustained throughput | ≥ 200 req/s |
+| Leader election after leader death | < 2 s |
+| Committed writes lost on leader failure | 0 |
+| AWS cost budget | < €20 / month |
 
-<!-- Fill after the 5h reading block. -->
+### Measurement
+
+- **Nominal load:** 100 req/s sustained scoring requests using the versioned
+  golden request payload.
+- **Latency:** end-to-end HTTP request latency, measured at the client.
+- **Throughput:** successful scoring requests per second sustained for 10 minutes.
+- **Leader election:** time from leader failure until a new leader is elected and able to accept writes.
+- **Committed write loss:** number of previously committed writes missing after leader failure and recovery.
+- **AWS cost:** monthly infrastructure cost measured from AWS billing data.
 
 ## Running locally
 
