@@ -26,8 +26,6 @@ type AppendEntriesArgs struct {
 
 // AppendEntriesReply is the response to an AppendEntriesArgs
 type AppendEntriesReply struct {
-	Term          uint64 // currentTerm, for leader to update itself
-	Success       bool   // true if follower contained entry matching prevLogIndex and prevLogTerm
-	ConflictTerm  uint64 // term of the conflicting entry (if any)
-	ConflictIndex uint64 // index of the first entry with that term (if any)
+	Term    uint64 // currentTerm, for leader to update itself
+	Success bool   // true if follower contained entry matching prevLogIndex and prevLogTerm
 }
