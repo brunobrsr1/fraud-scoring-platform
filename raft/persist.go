@@ -101,3 +101,36 @@ func (m *MemoryStorage) Clone() *MemoryStorage {
 	defer m.mu.Unlock()
 	return &MemoryStorage{state: bytes.Clone(m.state)}
 }
+
+// persist saves currentTerm, votedFor and the log. It must run before the node
+// replies to an RPC or counts itself toward a majority based on that state.
+// Must be called with mu held. A storage failure panics: a node that cannot
+// remember its vote or its log must not keep taking part in the cluster.
+func (n *Node) persist() {
+	err := n.storage.Save(PersistentState{
+		CurrentTerm: n.currentTerm,
+		VotedFor:    n.votedFor,
+		Entries:     n.log.entries,
+	})
+	if err != nil {
+		panic(fmt.Sprintf("raft: node %s: persisting state: %v", n.id, err))
+	}
+}
+
+// restoreState loads what persist saved. Fresh storage starts an empty log.
+func (n *Node) restoreState(state PersistentState) error {
+	n.currentTerm = state.CurrentTerm
+	n.votedFor = state.VotedFor
+	if len(state.Entries) == 0 {
+		n.log = newRaftLog()
+		return nil
+	}
+	for i := 1; i < len(state.Entries); i++ {
+		if state.Entries[i].Index != state.Entries[i-1].Index+1 {
+			return fmt.Errorf("raft: corrupt log in storage: index %d follows %d",
+				state.Entries[i].Index, state.Entries[i-1].Index)
+		}
+	}
+	n.log = raftLog{entries: state.Entries}
+	return nil
+}
