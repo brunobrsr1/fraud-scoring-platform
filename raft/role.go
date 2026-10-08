@@ -69,6 +69,13 @@ func (n *Node) becomeLeader() {
 		n.nextIndex[p] = n.log.lastIndex() + 1
 		n.matchIndex[p] = 0
 	}
+
+	// A leader can only count replicas for entries of its own term. The no-op
+	// gives it one right away, so entries left over from older terms get
+	// committed without waiting for the next real command.
+	n.log.append(Entry{Index: n.log.lastIndex() + 1, Term: n.currentTerm})
+	n.persist()
+	n.advanceCommitIndex()
 	n.logger.Debug("became leader", "term", n.currentTerm, "lastIndex", n.log.lastIndex())
 
 	// A fresh channel per leadership, so a loop left over from an older term
