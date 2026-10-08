@@ -4,8 +4,9 @@ A real-time fraud-scoring inference service backed by a hand-written Raft consen
 core that makes model-version promotions **ordered, durable, and observable**. The
 scoring model is a frozen placeholder — the infrastructure is the point.
 
-> **Status:** v0 — local single-node serving, containerized with Docker Compose. The
-> distributed registry and Raft core are the target, not yet built. See [Roadmap](#roadmap).
+> **Status:** v0 — local single-node serving, containerized with Docker Compose. The Raft
+> core is built as a library (election, replication, durable storage, HTTP transport); the
+> registry state machine on top of it is next. See [Roadmap](#roadmap).
 
 ---
 
@@ -206,8 +207,9 @@ Written:
 Decided, write-up pending:
 
 - **ADR-003** — Registry read semantics: linearizable leader reads vs. local follower reads.
+- **ADR-005** — Raft transport: HTTP/JSON on the standard library, over gRPC or `net/rpc`.
 
-<!-- TODO: write up ADR-003 (half a page) and link it here. -->
+<!-- TODO: write up ADR-003 and ADR-005 (half a page each) and link them here. -->
 
 ## Service-level objectives
 
@@ -252,6 +254,7 @@ relative:
 ```bash
 go run ./cmd/score-server
 go test ./...
+go test -race ./raft/...   # Raft unit, cluster, crash and HTTP tests (~40 s)
 ```
 
 | Variable | Default | Meaning |
@@ -271,13 +274,42 @@ coursework. The MIT 6.5840 chaos-test harness is used *only* to validate the imp
 never as its structure. Honest provenance is the point: the value is in having built and
 debugged the core, and this section stays accurate to that.
 
+The consensus core lives in [`raft/`](raft/) and is independent of fraud scoring: it
+replicates opaque `[]byte` commands and knows nothing about models.
+
+What it does:
+
+- **Leader election** with randomized timeouts and the log up-to-date check on votes.
+- **Log replication and commit.** A leader only commits entries from its own term by counting
+  replicas, and writes a no-op when elected so inherited entries commit too. Committed entries
+  are delivered in order on a channel.
+- **Durable state.** `FileStorage` writes term, vote and log atomically (temp file + fsync +
+  rename + directory fsync), so a crash leaves the old state or the new one, never half.
+- **HTTP/JSON transport** in [`raft/httptransport`](raft/httptransport/), standard library only.
+
+Deliberately simple, each with a known cost:
+
+- One mutex per node; the leader backs up one entry at a time on a log mismatch.
+- The whole state is rewritten on every save — fine for a tiny log with rare writes (OQ-1).
+- **No snapshots** — the registry state is a few fields and writes are human-initiated, so the
+  log never grows enough to matter (OQ-2).
+- No pre-vote, leases or check-quorum; no membership changes (a non-goal).
+
+How it's tested: an in-memory network that can disconnect, crash, restart, delay and drop
+messages between real nodes. On **every** applied entry the harness checks that no two nodes
+ever apply different commands at the same index. On top of that: crash/restart tests, chaos
+tests that keep killing leaders mid-replication, and a 3-node cluster over real HTTP with
+on-disk storage. Removing a single `persist()` call makes the crash tests fail, which is how
+we know they test something.
+
 ## Roadmap
 
 - [x] Architecture spec — decided sections (§1.1–§1.7)
 - [x] v0 — local single-node serving (frozen model, `POST /v1/score`)
 - [x] Containerized local dev (`docker compose up`)
 - [x] SLOs committed before measuring
-- [ ] **Raft core (from paper) + registry state machine** ← *now*
+- [x] Raft core — election, replication, durable storage, HTTP transport
+- [ ] **Registry state machine on the Raft core** ← *now*
 - [ ] Observability (Prometheus, Grafana, structured logs)
 - [ ] AWS deployment (Terraform, 3-node cluster across 2 AZs)
 - [ ] Load testing + SLO verification
