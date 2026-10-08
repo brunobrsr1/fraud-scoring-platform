@@ -313,8 +313,3 @@ we know they test something.
 - [ ] Observability (Prometheus, Grafana, structured logs)
 - [ ] AWS deployment (Terraform, 3-node cluster across 2 AZs)
 - [ ] Load testing + SLO verification
-
----
-
-*The full design spec and decision log are maintained separately; this README is the
-10-minute overview.*
