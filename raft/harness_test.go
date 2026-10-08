@@ -418,6 +418,26 @@ func (c *cluster) proposeToLeader(cmd []byte) (uint64, bool) {
 	return 0, false
 }
 
+// anyLeader returns a running, connected node that thinks it is leader.
+func (c *cluster) anyLeader() (NodeID, bool) {
+	for _, st := range c.liveStatuses() {
+		if st.Role == Leader {
+			return st.ID, true
+		}
+	}
+	return "", false
+}
+
+// anyCrashed returns a node that is currently crashed.
+func (c *cluster) anyCrashed() (NodeID, bool) {
+	for _, id := range c.ids {
+		if c.node(id) == nil {
+			return id, true
+		}
+	}
+	return "", false
+}
+
 func cmd(i int) string { return fmt.Sprintf("cmd-%d", i) }
 
 // waits long enough for any election that is going to happen to happen
