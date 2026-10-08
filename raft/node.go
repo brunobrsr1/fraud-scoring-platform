@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -13,8 +14,9 @@ type NodeID string // identifies a node in the cluster. Empty string means "nobo
 
 // Errors returned by Node methods
 var (
-	ErrNotLeader = errors.New("raft: not the leader")
-	ErrStopped   = errors.New("raft: node is stopped")
+	ErrNotLeader    = errors.New("raft: not the leader")
+	ErrStopped      = errors.New("raft: node is stopped")
+	ErrEmptyCommand = errors.New("raft: empty command")
 )
 
 // broadcastTime << electionTimeout << MTBF
@@ -27,8 +29,9 @@ const (
 )
 
 // ApplyMsg delivers one committed log entry to the service, in index order.
-// A nil Command is a no-op entry written by a new leader; the service should
-// skip it.
+// An empty Command is a no-op entry written by a new leader; the service should
+// skip it. There are no snapshots, so after a restart every entry is delivered
+// again from index 1 and the service rebuilds its state from scratch.
 type ApplyMsg struct {
 	Index   uint64
 	Term    uint64
@@ -219,6 +222,7 @@ func (n *Node) Start() {
 	// become one ourselves.
 	n.resetElectionTimer()
 	n.spawn(n.ticker)
+	n.spawn(n.applier)
 }
 
 func (n *Node) Stop() {
@@ -239,6 +243,36 @@ func (n *Node) Stop() {
 	n.logger.Debug("node stopped")
 }
 
+// Propose appends cmd to the leader's log and starts replicating it. It
+// returns right away; the entry is only committed once it shows up on
+// ApplyCh. If leadership changes first, the entry may never commit and the
+// caller should retry with the new leader.
+func (n *Node) Propose(cmd []byte) (index, term uint64, err error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	if n.stopped {
+		return 0, 0, ErrStopped
+	}
+	if n.role != Leader {
+		return 0, 0, ErrNotLeader
+	}
+	// Empty commands are how no-ops look, and gob stores nil and empty the
+	// same way, so they can't be told apart after a restart.
+	if len(cmd) == 0 {
+		return 0, 0, ErrEmptyCommand
+	}
+
+	index = n.log.lastIndex() + 1
+	n.log.append(Entry{Index: index, Term: n.currentTerm, Command: bytes.Clone(cmd)})
+	// The leader counts itself toward the majority, so the entry has to be on
+	// our own disk first.
+	n.persist()
+	n.advanceCommitIndex() // a single-node cluster commits right away
+	n.kick()
+	return index, n.currentTerm, nil
+}
+
 func (n *Node) Status() Status {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -256,6 +290,15 @@ func (n *Node) Status() Status {
 func (n *Node) quorum() int {
 	clusterSize := len(n.peers) + 1
 	return clusterSize/2 + 1
+}
+
+// kick wakes the leader loop so it replicates now instead of at the next
+// heartbeat. Never blocks, one pending kick is enough.
+func (n *Node) kick() {
+	select {
+	case n.kickCh <- struct{}{}:
+	default:
+	}
 }
 
 // spawn runs f in a goroutine that Stop waits for. Must be called with mu held.

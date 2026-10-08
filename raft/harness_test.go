@@ -5,8 +5,10 @@
 package raft
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math/rand/v2"
 	"os"
@@ -155,6 +157,9 @@ type cluster struct {
 	mu       sync.Mutex
 	nodes    map[NodeID]*Node // nil while a node is crashed
 	storages map[NodeID]*MemoryStorage
+	done     map[NodeID]chan struct{}     // closed on crash, stops that node's apply reader
+	applied  map[NodeID]map[uint64][]byte // everything each node has applied, kept across restarts
+	readers  sync.WaitGroup
 }
 
 func newCluster(t *testing.T, size int) *cluster {
@@ -165,6 +170,8 @@ func newCluster(t *testing.T, size int) *cluster {
 		logger:   slog.New(slog.DiscardHandler),
 		nodes:    map[NodeID]*Node{},
 		storages: map[NodeID]*MemoryStorage{},
+		done:     map[NodeID]chan struct{}{},
+		applied:  map[NodeID]map[uint64][]byte{},
 	}
 	if os.Getenv("RAFT_DEBUG") != "" {
 		c.logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
@@ -174,6 +181,7 @@ func newCluster(t *testing.T, size int) *cluster {
 	}
 	for _, id := range c.ids {
 		c.storages[id] = NewMemoryStorage()
+		c.applied[id] = map[uint64][]byte{}
 		c.start(id)
 		c.connect(id)
 	}
@@ -187,20 +195,55 @@ func (c *cluster) start(id NodeID) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	applyCh := make(chan ApplyMsg)
 	n, err := New(Config{
 		ID:        id,
 		Peers:     c.ids,
 		Transport: &endpoint{net: c.net, from: id},
 		Storage:   c.storages[id],
-		ApplyCh:   make(chan ApplyMsg, 1000),
+		ApplyCh:   applyCh,
 		Logger:    c.logger,
 	})
 	if err != nil {
 		c.t.Fatalf("starting %s: %v", id, err)
 	}
 	c.nodes[id] = n
+	done := make(chan struct{})
+	c.done[id] = done
+	c.readers.Add(1)
+	go c.readApplies(id, applyCh, done)
+
 	c.net.setHandler(id, n)
 	n.Start()
+}
+
+// readApplies checks every entry a node applies: indexes must come in order
+// with no gaps, and no two nodes may ever apply different commands at the same
+// index. That second one is the whole point of Raft.
+func (c *cluster) readApplies(id NodeID, applyCh <-chan ApplyMsg, done <-chan struct{}) {
+	defer c.readers.Done()
+	next := uint64(1)
+	for {
+		var m ApplyMsg
+		select {
+		case m = <-applyCh:
+		case <-done:
+			return
+		}
+		if m.Index != next {
+			c.t.Errorf("%s applied index %d, expected %d", id, m.Index, next)
+		}
+		next = m.Index + 1
+
+		c.mu.Lock()
+		for other, log := range c.applied {
+			if prev, ok := log[m.Index]; ok && !bytes.Equal(prev, m.Command) {
+				c.t.Errorf("%s applied %q at index %d but %s applied %q", id, m.Command, m.Index, other, prev)
+			}
+		}
+		c.applied[id][m.Index] = m.Command
+		c.mu.Unlock()
+	}
 }
 
 // crash stops a node. Its storage is cloned so the dead node can't write into
@@ -217,6 +260,7 @@ func (c *cluster) crash(id NodeID) {
 	n.Stop()
 
 	c.mu.Lock()
+	close(c.done[id])
 	c.storages[id] = c.storages[id].Clone()
 	c.mu.Unlock()
 }
@@ -233,6 +277,7 @@ func (c *cluster) shutdown() {
 	for _, id := range c.ids {
 		c.crash(id)
 	}
+	c.readers.Wait()
 }
 
 func (c *cluster) node(id NodeID) *Node {
@@ -318,6 +363,62 @@ func (c *cluster) checkTerms() uint64 {
 	c.t.Fatal("nodes never agreed on a term")
 	return 0
 }
+
+// nCommitted returns how many nodes have applied index, and what they applied.
+func (c *cluster) nCommitted(index uint64) (int, []byte) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	count := 0
+	var cmd []byte
+	for _, log := range c.applied {
+		if got, ok := log[index]; ok {
+			count++
+			cmd = got
+		}
+	}
+	return count, cmd
+}
+
+// one proposes cmd through whichever connected node is leader and waits until
+// at least `want` nodes applied it. It keeps retrying (a leader can lose its
+// job before committing) for up to 10s, then fails the test.
+func (c *cluster) one(cmd string, want int) uint64 {
+	c.t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		index, ok := c.proposeToLeader([]byte(cmd))
+		if !ok {
+			time.Sleep(50 * time.Millisecond)
+			continue
+		}
+		commitBy := time.Now().Add(2 * time.Second)
+		for time.Now().Before(commitBy) {
+			count, got := c.nCommitted(index)
+			if count >= want && string(got) == cmd {
+				return index
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+	c.t.Fatalf("one(%q) did not reach %d nodes", cmd, want)
+	return 0
+}
+
+// proposeToLeader tries Propose on every connected node until one accepts.
+func (c *cluster) proposeToLeader(cmd []byte) (uint64, bool) {
+	for _, id := range c.ids {
+		n := c.node(id)
+		if n == nil || !c.net.isConnected(id) {
+			continue
+		}
+		if index, _, err := n.Propose(cmd); err == nil {
+			return index, true
+		}
+	}
+	return 0, false
+}
+
+func cmd(i int) string { return fmt.Sprintf("cmd-%d", i) }
 
 // waits long enough for any election that is going to happen to happen
 func waitElectionTimeouts(k int) {
