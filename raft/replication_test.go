@@ -109,3 +109,124 @@ func TestLeaderStepsDownOnHigherTermHeartbeatReply(t *testing.T) {
 		return st.Role == Follower && st.Term == 9
 	})
 }
+
+func TestAppendEntriesStoresNewEntries(t *testing.T) {
+	n, storage, _ := newTestNode(t, "s1", threeNodes, nil)
+	n.currentTerm = 1
+
+	reply, _ := n.HandleAppendEntries(&AppendEntriesArgs{Term: 1, LeaderID: "s2", Entries: entries(1, 1, 1)})
+	if !reply.Success {
+		t.Fatal("append to an empty log failed")
+	}
+	if got := logTerms(&n.log); len(got) != 2 {
+		t.Fatalf("log terms = %v; want [1 1]", got)
+	}
+	if st, _ := storage.Load(); len(st.Entries) != 3 { // sentinel + 2
+		t.Fatalf("persisted %d entries; want 3", len(st.Entries))
+	}
+}
+
+func TestAppendEntriesTruncatesConflict(t *testing.T) {
+	n, _, _ := newTestNode(t, "s1", threeNodes, nil)
+	n.currentTerm = 3
+	n.log = logWithTerms(1, 1, 2, 2) // the term 2 entries never committed
+
+	reply, _ := n.HandleAppendEntries(&AppendEntriesArgs{Term: 3, LeaderID: "s2", PrevLogIndex: 2, PrevLogTerm: 1, Entries: entries(3, 3)})
+	if !reply.Success {
+		t.Fatal("append failed")
+	}
+	got := logTerms(&n.log)
+	if len(got) != 3 || got[2] != 3 {
+		t.Fatalf("log terms = %v; want [1 1 3]", got)
+	}
+}
+
+func TestAppendEntriesKeepsEntriesOnDelayedRPC(t *testing.T) {
+	n, _, _ := newTestNode(t, "s1", threeNodes, nil)
+	n.currentTerm = 1
+	n.log = logWithTerms(1, 1, 1)
+
+	// an older RPC from the same leader shows up late with only the first entry
+	_, _ = n.HandleAppendEntries(&AppendEntriesArgs{Term: 1, LeaderID: "s2", Entries: entries(1, 1)})
+	if got := logTerms(&n.log); len(got) != 3 {
+		t.Fatalf("log terms = %v; a delayed RPC must not truncate matching entries", got)
+	}
+}
+
+func TestAppendEntriesCommitIndex(t *testing.T) {
+	n, _, _ := newTestNode(t, "s1", threeNodes, nil)
+	n.currentTerm = 1
+	n.log = logWithTerms(1, 1, 1, 1, 1)
+
+	// leader has committed 5 but this RPC only proves we share up to 3
+	_, _ = n.HandleAppendEntries(&AppendEntriesArgs{Term: 1, LeaderID: "s2", PrevLogIndex: 3, PrevLogTerm: 1, LeaderCommit: 5})
+	if n.commitIndex != 3 {
+		t.Fatalf("commitIndex = %d; want 3", n.commitIndex)
+	}
+
+	// an old heartbeat must not move it back
+	_, _ = n.HandleAppendEntries(&AppendEntriesArgs{Term: 1, LeaderID: "s2", PrevLogIndex: 1, PrevLogTerm: 1, LeaderCommit: 5})
+	if n.commitIndex != 3 {
+		t.Fatalf("commitIndex = %d after an old heartbeat; want 3", n.commitIndex)
+	}
+}
+
+func TestAdvanceCommitIndexOnlyCountsCurrentTerm(t *testing.T) {
+	n, _, _ := newTestNode(t, "s1", threeNodes, nil)
+	n.currentTerm, n.role = 3, Leader
+	n.log = logWithTerms(1, 2)
+	n.matchIndex = map[NodeID]uint64{"s2": 2, "s3": 0}
+
+	// index 2 is on a majority but it's from term 2
+	n.advanceCommitIndex()
+	if n.commitIndex != 0 {
+		t.Fatalf("commitIndex = %d; an old-term entry must not be committed by counting", n.commitIndex)
+	}
+
+	// once a term 3 entry is on a majority, everything before it commits too
+	n.log.append(entries(3, 3)...)
+	n.matchIndex["s2"] = 3
+	n.advanceCommitIndex()
+	if n.commitIndex != 3 {
+		t.Fatalf("commitIndex = %d; want 3", n.commitIndex)
+	}
+}
+
+func TestProposeErrors(t *testing.T) {
+	n, _, _ := newTestNode(t, "s1", threeNodes, nil)
+	if _, _, err := n.Propose([]byte("x")); err != ErrNotLeader {
+		t.Fatalf("Propose on follower: err = %v; want ErrNotLeader", err)
+	}
+
+	n.mu.Lock()
+	n.role = Leader
+	n.mu.Unlock()
+	if _, _, err := n.Propose(nil); err != ErrEmptyCommand {
+		t.Fatalf("Propose(nil): err = %v; want ErrEmptyCommand", err)
+	}
+}
+
+func TestSingleNodeCommitsAndApplies(t *testing.T) {
+	n, _, applyCh := newTestNode(t, "solo", []NodeID{"solo"}, nil)
+	n.Start()
+	waitFor(t, 2*time.Second, "single node to become leader", func() bool { return n.Status().Role == Leader })
+
+	index, _, err := n.Propose([]byte("hello"))
+	if err != nil {
+		t.Fatalf("Propose: %v", err)
+	}
+	// first the leader's no-op, then our command
+	for want := uint64(1); want <= index; want++ {
+		select {
+		case m := <-applyCh:
+			if m.Index != want {
+				t.Fatalf("applied index %d; want %d", m.Index, want)
+			}
+			if m.Index == index && string(m.Command) != "hello" {
+				t.Fatalf("applied %q; want hello", m.Command)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("index %d never applied", want)
+		}
+	}
+}
