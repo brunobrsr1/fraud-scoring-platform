@@ -1,5 +1,5 @@
 // Unit tests for individual Raft rules. They are in package raft so they can
-// set internal state directly.
+// set internal state directly. Cluster tests are in cluster_test.go.
 
 package raft
 
