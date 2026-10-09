@@ -269,13 +269,9 @@ to 5 s to finish.
 
 ## On the Raft implementation
 
-The consensus core is written from the Raft paper, independently — **not** ported from
-coursework. The MIT 6.5840 chaos-test harness is used *only* to validate the implementation,
-never as its structure. Honest provenance is the point: the value is in having built and
-debugged the core, and this section stays accurate to that.
-
-The consensus core lives in [`raft/`](raft/) and is independent of fraud scoring: it
-replicates opaque `[]byte` commands and knows nothing about models.
+The consensus core lives in [`raft/`](raft/). It is built from the Raft paper with no
+consensus libraries, and it is independent of fraud scoring: it replicates opaque `[]byte`
+commands and knows nothing about models.
 
 What it does:
 
